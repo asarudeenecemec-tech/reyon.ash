@@ -1,127 +1,132 @@
-/* Scroll-scrub the supplied ezgif-frame-001.jpg through ezgif-frame-200.jpg. */
+/* Scroll-controlled 200-frame portfolio sequence with graceful fallback and alternating story panels. */
 (() => {
   const hero = document.querySelector('.hero');
   const scene = document.getElementById('scene');
-  const panelsRoot = document.getElementById('storyPanels');
   if (!hero || !scene) return;
 
-  const css = document.createElement('style');
-  css.textContent = `
-    .hero-scene { isolation:isolate; }
-    #scroll-frames { position:absolute; inset:0; z-index:4; display:block; width:100%; height:100%; object-fit:cover; }
-    .hero-reference, .story-title, .floating, .cloud, .mist, .character-stage, .hero-copy { visibility:hidden !important; }
-    .story-panels { z-index:18; }
-    .scroll-chapter { pointer-events:none; }
-    .scroll-chapter a { pointer-events:auto; }
-    @media (max-width:760px) { #scroll-frames { object-fit:cover; } }
+  const styles = document.createElement('style');
+  styles.textContent = `
+    .hero-scene { position:sticky !important; top:0; isolation:isolate; overflow:hidden; }
+    #scroll-frames { position:absolute; inset:0; z-index:4; width:100%; height:100%; display:block; pointer-events:none; }
+    .story-panels { position:absolute; inset:0; z-index:18; pointer-events:none; }
+    .scroll-chapter { position:absolute; top:24%; width:min(38vw,520px); padding:clamp(18px,2.4vw,34px); border:1px solid rgba(255,255,255,.24); border-radius:24px; background:linear-gradient(145deg,rgba(20,14,64,.88),rgba(67,48,145,.76)); color:#f7f3ff; box-shadow:0 22px 60px rgba(8,5,40,.35); backdrop-filter:blur(14px); opacity:0; will-change:transform,opacity; }
+    .scroll-chapter.left { left:5%; } .scroll-chapter.right { right:5%; }
+    .scroll-chapter > span { color:#ffd58a; font-size:.7rem; font-weight:800; letter-spacing:.18em; }
+    .scroll-chapter h2 { margin:.65em 0 .4em; color:#fff; font-size:clamp(1.7rem,3.2vw,3.1rem); line-height:.98; letter-spacing:-.055em; }
+    .scroll-chapter p { margin:0; color:#e7e0ff; font-size:clamp(.92rem,1.18vw,1.12rem); line-height:1.65; }
+    .scroll-chapter a { display:inline-flex; gap:.7em; align-items:center; margin-top:1.2em; padding:.8em 1.2em; border-radius:999px; background:linear-gradient(90deg,#ffbf42,#ff8d40); color:#2c1947; text-decoration:none; font-weight:800; pointer-events:auto; }
+    .frame-sequence-ready .hero-reference, .frame-sequence-ready .story-title, .frame-sequence-ready .floating, .frame-sequence-ready .cloud, .frame-sequence-ready .mist, .frame-sequence-ready .character-stage, .frame-sequence-ready .hero-copy { visibility:hidden !important; }
+    @media(max-width:760px){ .scroll-chapter { top:15%; left:5% !important; right:5% !important; width:auto; padding:18px; } .scroll-chapter h2 { font-size:clamp(1.6rem,8vw,2.6rem); } .scroll-chapter p { font-size:.9rem; } }
   `;
-  document.head.append(css);
+  document.head.append(styles);
+
+  let panelsRoot = document.getElementById('storyPanels');
+  if (!panelsRoot) {
+    panelsRoot = document.createElement('div');
+    panelsRoot.id = 'storyPanels';
+    panelsRoot.className = 'story-panels';
+    scene.append(panelsRoot);
+  }
+  const chapters = [
+    { start:.30, end:.45, side:'right', label:'01 / ABOUT', heading:'A story-led designer.', text:'I’m Reyon S.—an instructional designer, writer, and producer creating thoughtful learning experiences.' },
+    { start:.47, end:.62, side:'left', label:'02 / WHAT I DO', heading:'Make ideas easier to learn.', text:'From storyboards to finished courses, I build clear learning journeys with Storyline, Rise 360, and Vyond.' },
+    { start:.64, end:.78, side:'right', label:'03 / MY TOOLKIT', heading:'Design. Develop. Inspire.', text:'Instructional design · Curriculum · eLearning · Video production · LMS delivery · Visual content.' },
+    { start:.79, end:.91, side:'left', label:'04 / EXPERIENCE', heading:'Learners come first.', text:'Content strategy, facilitation, and production—combined to make learning practical and memorable.' },
+    { start:.92, end:1.01, side:'right', label:'05 / CONTACT', heading:'Your next idea starts here.', text:'Sharjah, UAE · sreyon.s@gmail.com · WhatsApp +971 52 856 2924', contact:true }
+  ];
+  panelsRoot.replaceChildren(...chapters.map((item) => {
+    const card = document.createElement('article');
+    card.className = `scroll-chapter ${item.side}`;
+    card.innerHTML = `<span>${item.label}</span><h2>${item.heading}</h2><p>${item.text}</p>${item.contact ? '<a href="mailto:sreyon.s@gmail.com">Say hello <b>↗</b></a>' : ''}`;
+    return card;
+  }));
+  const cards = [...panelsRoot.children];
 
   const canvas = document.createElement('canvas');
   canvas.id = 'scroll-frames';
   canvas.setAttribute('aria-hidden', 'true');
   scene.prepend(canvas);
-  const ctx = canvas.getContext('2d', { alpha: false });
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const clamp = (n, a = 0, b = 1) => Math.min(b, Math.max(a, n));
-  const ease = (n) => { n = clamp(n); return n * n * (3 - 2 * n); };
-  const range = (p, a, b) => ease((p - a) / (b - a));
-  const framePath = (n) => `ezgif-frame-${String(n).padStart(3, '0')}.jpg`;
+  const context = canvas.getContext('2d', { alpha:false });
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const cache = new Map();
+  const clamp = (n,a=0,b=1) => Math.min(b,Math.max(a,n));
+  const smooth = (n) => { n=clamp(n); return n*n*(3-2*n); };
+  const range = (p,a,b) => smooth((p-a)/(b-a));
+  const localFrame = (n) => `ezgif-frame-${String(n).padStart(3,'0')}.jpg`;
+  const rawFrame = (n) => `https://raw.githubusercontent.com/asarudeenecemec-tech/reyon.ash/main/${localFrame(n)}`;
   let requested = 1;
-  let renderQueued = false;
-  let lastProgress = 0;
+  let rafPending = false;
+  let failed = false;
 
-  const chapters = [
-    { start: .30, end: .45, side: 'right', kicker: '01 / ABOUT', heading: 'A story-led designer.', text: 'I’m Reyon S.—an instructional designer, writer, and producer creating thoughtful learning experiences.' },
-    { start: .47, end: .62, side: 'left', kicker: '02 / WHAT I DO', heading: 'Make ideas easier to learn.', text: 'From storyboards to finished courses, I build clear learning journeys with Storyline, Rise 360, and Vyond.' },
-    { start: .64, end: .78, side: 'right', kicker: '03 / MY TOOLKIT', heading: 'Design. Develop. Inspire.', text: 'Instructional design · Curriculum · eLearning · Video production · LMS delivery · Visual content.' },
-    { start: .79, end: .91, side: 'left', kicker: '04 / EXPERIENCE', heading: 'Learners come first.', text: 'Content strategy, facilitation, and production—combined to make learning practical and memorable.' },
-    { start: .92, end: 1.02, side: 'right', kicker: '05 / CONTACT', heading: 'Your next idea starts here.', text: 'Sharjah, UAE · sreyon.s@gmail.com · WhatsApp +971 52 856 2924', contact: true }
-  ];
-  const chapterEls = chapters.map((chapter) => {
-    const el = document.createElement('article');
-    el.className = `scroll-chapter ${chapter.side}`;
-    el.innerHTML = `<span>${chapter.kicker}</span><h2>${chapter.heading}</h2><p>${chapter.text}</p>${chapter.contact ? '<a href="mailto:sreyon.s@gmail.com">Say hello <b>↗</b></a>' : ''}`;
-    panelsRoot.append(el);
-    return { ...chapter, el };
-  });
-
-  function resizeCanvas() {
-    const rect = scene.getBoundingClientRect();
+  function resize() {
+    const box = scene.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const width = Math.max(1, Math.round(rect.width * dpr));
-    const height = Math.max(1, Math.round(rect.height * dpr));
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
-      draw(requested);
-    }
+    const w = Math.max(1, Math.round(box.width*dpr));
+    const h = Math.max(1, Math.round(box.height*dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width=w; canvas.height=h; }
   }
-
-  function loadFrame(n) {
+  function drawCover(image) {
+    if (!image || !context) return;
+    const w=canvas.width, h=canvas.height;
+    const scale=Math.max(w/image.naturalWidth,h/image.naturalHeight);
+    const dw=image.naturalWidth*scale, dh=image.naturalHeight*scale;
+    context.clearRect(0,0,w,h);
+    context.drawImage(image,(w-dw)/2,(h-dh)/2,dw,dh);
+  }
+  function load(n) {
     if (cache.has(n)) return cache.get(n);
-    const image = new Image();
-    image.decoding = 'async';
     const promise = new Promise((resolve) => {
-      image.onload = async () => {
-        try { if (image.decode) await image.decode(); } catch (_) { /* load event already confirms usable image */ }
-        resolve(image);
+      const image = new Image();
+      image.decoding='async';
+      image.onload=() => resolve(image);
+      image.onerror=() => {
+        if (image.src !== rawFrame(n)) {
+          image.src=rawFrame(n);
+        } else resolve(null);
       };
-      image.onerror = () => resolve(null);
-      image.src = framePath(n);
+      image.src=localFrame(n);
     });
-    cache.set(n, promise);
+    cache.set(n,promise);
     return promise;
   }
-
-  function drawCover(image) {
-    if (!image || !ctx) return;
-    const cw = canvas.width, ch = canvas.height;
-    const scale = Math.max(cw / image.naturalWidth, ch / image.naturalHeight);
-    const width = image.naturalWidth * scale;
-    const height = image.naturalHeight * scale;
-    ctx.clearRect(0, 0, cw, ch);
-    ctx.drawImage(image, (cw - width) / 2, (ch - height) / 2, width, height);
-  }
-
-  async function draw(n) {
-    requested = clamp(n, 1, 200);
-    const target = requested;
-    const image = await loadFrame(target);
-    if (target === requested && image) drawCover(image);
-    // Keep only nearby decoded images; the browser can still reuse its HTTP cache.
-    for (const [key] of cache) if (Math.abs(key - requested) > 4) cache.delete(key);
-    for (const neighbor of [target + 1, target + 2, target - 1]) {
-      if (neighbor >= 1 && neighbor <= 200) loadFrame(neighbor);
+  async function showFrame(n) {
+    requested=clamp(n,1,200);
+    const current=requested;
+    const image=await load(current);
+    if (current !== requested) return;
+    if (!image) {
+      if (current === 1 && !failed) {
+        failed=true;
+        document.documentElement.classList.remove('frame-sequence-ready');
+        canvas.style.display='none';
+      }
+      return;
     }
+    failed=false;
+    canvas.style.display='block';
+    document.documentElement.classList.add('frame-sequence-ready');
+    drawCover(image);
+    // Load only a few nearby frames ahead for responsive scroll without fetching all 200 at once.
+    [current+1,current+2,current-1].forEach((next) => { if (next>=1 && next<=200) load(next); });
   }
 
-  function update() {
-    renderQueued = false;
-    resizeCanvas();
-    const distance = Math.max(1, hero.offsetHeight - window.innerHeight);
-    const progress = clamp(-hero.getBoundingClientRect().top / distance);
-    lastProgress = progress;
-    // 001 is the opening image; scrolling advances one continuous 200-frame movie.
-    draw(reduced ? 1 : Math.round(1 + progress * 199));
-    chapterEls.forEach(({ el, start, end, side }) => {
-      const visible = reduced ? 1 : Math.min(range(progress, start, start + .035), 1 - range(progress, end - .035, end));
-      el.style.opacity = String(visible);
-      el.style.transform = `translate3d(${((1 - visible) * (side === 'left' ? -22 : 22)).toFixed(1)}px,0,0)`;
+  function render() {
+    rafPending=false;
+    resize();
+    const travel=Math.max(1,hero.offsetHeight-window.innerHeight);
+    const progress=clamp(-hero.getBoundingClientRect().top/travel);
+    showFrame(reduced ? 1 : Math.round(1+progress*199));
+    cards.forEach((card,index) => {
+      const chapter=chapters[index];
+      const opacity=reduced ? 1 : Math.min(range(progress,chapter.start,chapter.start+.035),1-range(progress,chapter.end-.035,chapter.end));
+      const x=(1-opacity)*(chapter.side==='left' ? -22 : 22);
+      card.style.opacity=String(opacity);
+      card.style.transform=`translate3d(${x.toFixed(1)}px,0,0)`;
     });
   }
-
-  function requestUpdate() {
-    if (!renderQueued) {
-      renderQueued = true;
-      requestAnimationFrame(update);
-    }
-  }
-  addEventListener('scroll', requestUpdate, { passive: true });
-  addEventListener('resize', requestUpdate);
-  loadFrame(1).then((image) => { if (image) drawCover(image); });
-  // First/last frame and a few neighbors make the sequence start smoothly.
-  loadFrame(200);
-  update();
+  function requestRender() { if (!rafPending) { rafPending=true; requestAnimationFrame(render); } }
+  addEventListener('scroll',requestRender,{passive:true});
+  addEventListener('resize',requestRender);
+  showFrame(1);
+  render();
 })();
