@@ -1,19 +1,36 @@
-/* ZIP-reference opening art plus cinematic, scroll-scrubbed portfolio chapters. */
+/* Scroll-scrub the supplied ezgif-frame-001.jpg through ezgif-frame-200.jpg. */
 (() => {
   const hero = document.querySelector('.hero');
   const scene = document.getElementById('scene');
-  const reference = document.querySelector('.hero-reference');
-  const title = document.getElementById('storyTitle');
   const panelsRoot = document.getElementById('storyPanels');
-  const characterWrap = document.getElementById('characterWrapper');
-  const character = document.querySelector('.character');
-  const phone = document.querySelector('.phone-bubble');
   if (!hero || !scene) return;
 
-  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const css = document.createElement('style');
+  css.textContent = `
+    .hero-scene { isolation:isolate; }
+    #scroll-frames { position:absolute; inset:0; z-index:4; display:block; width:100%; height:100%; object-fit:cover; }
+    .hero-reference, .story-title, .floating, .cloud, .mist, .character-stage, .hero-copy { visibility:hidden !important; }
+    .story-panels { z-index:18; }
+    .scroll-chapter { pointer-events:none; }
+    .scroll-chapter a { pointer-events:auto; }
+    @media (max-width:760px) { #scroll-frames { object-fit:cover; } }
+  `;
+  document.head.append(css);
+
+  const canvas = document.createElement('canvas');
+  canvas.id = 'scroll-frames';
+  canvas.setAttribute('aria-hidden', 'true');
+  scene.prepend(canvas);
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const clamp = (n, a = 0, b = 1) => Math.min(b, Math.max(a, n));
   const ease = (n) => { n = clamp(n); return n * n * (3 - 2 * n); };
   const range = (p, a, b) => ease((p - a) / (b - a));
+  const framePath = (n) => `ezgif-frame-${String(n).padStart(3, '0')}.jpg`;
+  const cache = new Map();
+  let requested = 1;
+  let renderQueued = false;
+  let lastProgress = 0;
 
   const chapters = [
     { start: .30, end: .45, side: 'right', kicker: '01 / ABOUT', heading: 'A story-led designer.', text: 'I’m Reyon S.—an instructional designer, writer, and producer creating thoughtful learning experiences.' },
@@ -23,137 +40,88 @@
     { start: .92, end: 1.02, side: 'right', kicker: '05 / CONTACT', heading: 'Your next idea starts here.', text: 'Sharjah, UAE · sreyon.s@gmail.com · WhatsApp +971 52 856 2924', contact: true }
   ];
   const chapterEls = chapters.map((chapter) => {
-    const article = document.createElement('article');
-    article.className = `scroll-chapter ${chapter.side}`;
-    article.innerHTML = `<span>${chapter.kicker}</span><h2>${chapter.heading}</h2><p>${chapter.text}</p>${chapter.contact ? '<a href="mailto:sreyon.s@gmail.com">Say hello <b>↗</b></a>' : ''}`;
-    panelsRoot.append(article);
-    return { ...chapter, el: article };
+    const el = document.createElement('article');
+    el.className = `scroll-chapter ${chapter.side}`;
+    el.innerHTML = `<span>${chapter.kicker}</span><h2>${chapter.heading}</h2><p>${chapter.text}</p>${chapter.contact ? '<a href="mailto:sreyon.s@gmail.com">Say hello <b>↗</b></a>' : ''}`;
+    panelsRoot.append(el);
+    return { ...chapter, el };
   });
 
-  // The ZIP holds assets/char.webp. Read that image out of the committed ZIP at runtime,
-  // so the original character artwork is used without duplicating or redrawing it.
-  async function loadZipPortrait() {
-    const zipUrl = 'Reyon%20S%20Portfolio%20(1).zip';
-    try {
-      const response = await fetch(zipUrl);
-      if (!response.ok) throw new Error('ZIP unavailable');
-      const bytes = await response.arrayBuffer();
-      const view = new DataView(bytes);
-      let eocd = -1;
-      for (let i = bytes.byteLength - 22; i >= Math.max(0, bytes.byteLength - 65557); i--) {
-        if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-      }
-      if (eocd < 0) throw new Error('ZIP directory unavailable');
-      const count = view.getUint16(eocd + 10, true);
-      let cursor = view.getUint32(eocd + 16, true);
-      let imageBlob = null;
-      for (let i = 0; i < count; i++) {
-        if (view.getUint32(cursor, true) !== 0x02014b50) break;
-        const method = view.getUint16(cursor + 10, true);
-        const compressedSize = view.getUint32(cursor + 20, true);
-        const nameLength = view.getUint16(cursor + 28, true);
-        const extraLength = view.getUint16(cursor + 30, true);
-        const commentLength = view.getUint16(cursor + 32, true);
-        const localOffset = view.getUint32(cursor + 42, true);
-        const name = new TextDecoder().decode(new Uint8Array(bytes, cursor + 46, nameLength));
-        if (name === 'assets/char.webp') {
-          const localNameLength = view.getUint16(localOffset + 26, true);
-          const localExtraLength = view.getUint16(localOffset + 28, true);
-          const dataStart = localOffset + 30 + localNameLength + localExtraLength;
-          const compressed = bytes.slice(dataStart, dataStart + compressedSize);
-          let payload = compressed;
-          if (method === 8) {
-            if (!('DecompressionStream' in window)) throw new Error('ZIP decompression unavailable');
-            payload = await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
-          } else if (method !== 0) {
-            throw new Error('Unsupported ZIP compression');
-          }
-          imageBlob = new Blob([payload], { type: 'image/webp' });
-          break;
-        }
-        cursor += 46 + nameLength + extraLength + commentLength;
-      }
-      if (!imageBlob) throw new Error('Character image not found in ZIP');
-      const imageUrl = URL.createObjectURL(imageBlob);
-      document.querySelectorAll('.character-art, .zip-portrait').forEach((img) => { img.src = imageUrl; });
-      character?.classList.add('has-zip-art');
-    } catch (error) {
-      // Keep the included reference artwork as graceful fallback when ZIP fetch is unavailable.
-      document.documentElement.classList.add('zip-art-fallback');
+  function resizeCanvas() {
+    const rect = scene.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const width = Math.max(1, Math.round(rect.width * dpr));
+    const height = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+      draw(requested);
     }
   }
-  loadZipPortrait();
 
-  const clouds = [...scene.querySelectorAll('.cloud')];
-  const props = [...scene.querySelectorAll('.floating')];
-  let scheduled = false;
+  function loadFrame(n) {
+    if (cache.has(n)) return cache.get(n);
+    const image = new Image();
+    image.decoding = 'async';
+    const promise = new Promise((resolve) => {
+      image.onload = async () => {
+        try { if (image.decode) await image.decode(); } catch (_) { /* load event already confirms usable image */ }
+        resolve(image);
+      };
+      image.onerror = () => resolve(null);
+      image.src = framePath(n);
+    });
+    cache.set(n, promise);
+    return promise;
+  }
+
+  function drawCover(image) {
+    if (!image || !ctx) return;
+    const cw = canvas.width, ch = canvas.height;
+    const scale = Math.max(cw / image.naturalWidth, ch / image.naturalHeight);
+    const width = image.naturalWidth * scale;
+    const height = image.naturalHeight * scale;
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.drawImage(image, (cw - width) / 2, (ch - height) / 2, width, height);
+  }
+
+  async function draw(n) {
+    requested = clamp(n, 1, 200);
+    const target = requested;
+    const image = await loadFrame(target);
+    if (target === requested && image) drawCover(image);
+    // Keep only nearby decoded images; the browser can still reuse its HTTP cache.
+    for (const [key] of cache) if (Math.abs(key - requested) > 4) cache.delete(key);
+    for (const neighbor of [target + 1, target + 2, target - 1]) {
+      if (neighbor >= 1 && neighbor <= 200) loadFrame(neighbor);
+    }
+  }
+
   function update() {
-    scheduled = false;
+    renderQueued = false;
+    resizeCanvas();
     const distance = Math.max(1, hero.offsetHeight - window.innerHeight);
-    const p = clamp(-hero.getBoundingClientRect().top / distance);
-    if (reduced) {
-      if (reference) reference.style.opacity = '0';
-      if (title) title.style.opacity = '0';
-      chapterEls.forEach(({ el }) => { el.style.opacity = '1'; });
-      return;
-    }
-
-    // Start from the exact supplied cover image, then let it dissolve into the ZIP-inspired scene.
-    if (reference) {
-      const fade = range(p, .10, .29);
-      reference.style.opacity = String(1 - fade);
-      reference.style.transform = `scale(${(1 + .035 * range(p, 0, .28)).toFixed(3)}) translate3d(0, ${(-16 * range(p, 0, .28)).toFixed(1)}px, 0)`;
-    }
-    if (title) {
-      title.style.opacity = String(1 - range(p, .08, .27));
-      title.style.transform = `translate3d(0, ${(-34 * range(p, .04, .26)).toFixed(1)}px, 0)`;
-    }
-
-    // Clouds peel apart, with the props floating off in different directions.
-    const part = range(p, .02, .30);
-    clouds.forEach((cloud, i) => {
-      const direction = i === 1 ? 1 : -1;
-      cloud.style.transform = `translate3d(${(direction * window.innerWidth * .78 * part).toFixed(1)}px, ${(window.innerHeight * .12 * part).toFixed(1)}px, 0) scale(${(1 - .1 * part).toFixed(3)})`;
-      cloud.style.opacity = String(1 - range(p, .18, .34));
-    });
-    props.forEach((el, i) => {
-      const t = range(p, .05 + (i % 3) * .025, .27 + (i % 3) * .025);
-      const direction = i % 2 ? 1 : -1;
-      el.style.transform = `translate3d(${(direction * window.innerWidth * (.28 + (i % 3) * .08) * t).toFixed(1)}px, ${(-window.innerHeight * .15 * t).toFixed(1)}px, 0) rotate(${direction * 20 * t}deg)`;
-      el.style.opacity = String(1 - t);
-    });
-
-    // Walk the portrait from side to side between alternating story chapters.
-    const stops = [{p:.28,x:0},{p:.38,x:-.29},{p:.49,x:-.29},{p:.57,x:.29},{p:.67,x:.29},{p:.75,x:-.29},{p:.85,x:-.29},{p:.93,x:.27},{p:1,x:.27}];
-    let x = stops[0].x;
-    for (let i = 1; i < stops.length; i++) {
-      if (p <= stops[i].p) {
-        const t = range(p, stops[i - 1].p, stops[i].p);
-        x = stops[i - 1].x + (stops[i].x - stops[i - 1].x) * t;
-        break;
-      }
-      x = stops[i].x;
-    }
-    if (characterWrap) characterWrap.style.transform = `translate3d(calc(-50% + ${(x * window.innerWidth).toFixed(1)}px),0,0) scale(${(1 + .08 * range(p,.28,.4)).toFixed(3)})`;
-    if (character) character.style.transform = `perspective(1000px) rotateY(${(-12 + 12 * range(p,.31,.41)).toFixed(1)}deg)`;
-
+    const progress = clamp(-hero.getBoundingClientRect().top / distance);
+    lastProgress = progress;
+    // 001 is the opening image; scrolling advances one continuous 200-frame movie.
+    draw(reduced ? 1 : Math.round(1 + progress * 199));
     chapterEls.forEach(({ el, start, end, side }) => {
-      const opacity = Math.min(range(p, start, start + .035), 1 - range(p, end - .035, end));
-      el.style.opacity = String(opacity);
-      el.style.transform = `translate3d(${((1 - opacity) * (side === 'left' ? -22 : 22)).toFixed(1)}px,0,0)`;
+      const visible = reduced ? 1 : Math.min(range(progress, start, start + .035), 1 - range(progress, end - .035, end));
+      el.style.opacity = String(visible);
+      el.style.transform = `translate3d(${((1 - visible) * (side === 'left' ? -22 : 22)).toFixed(1)}px,0,0)`;
     });
-    if (phone) {
-      const handoff = range(p, .93, .985);
-      phone.style.opacity = String(handoff);
-      phone.style.transform = `scale(${(.4 + .6 * handoff).toFixed(3)}) translateY(${(18 - 18 * handoff).toFixed(1)}px)`;
-    }
-    const copy = document.getElementById('heroCopy');
-    if (copy) copy.style.opacity = String(1 - range(p, .28, .34));
   }
+
   function requestUpdate() {
-    if (!scheduled) { scheduled = true; requestAnimationFrame(update); }
+    if (!renderQueued) {
+      renderQueued = true;
+      requestAnimationFrame(update);
+    }
   }
   addEventListener('scroll', requestUpdate, { passive: true });
   addEventListener('resize', requestUpdate);
+  loadFrame(1).then((image) => { if (image) drawCover(image); });
+  // First/last frame and a few neighbors make the sequence start smoothly.
+  loadFrame(200);
   update();
 })();
