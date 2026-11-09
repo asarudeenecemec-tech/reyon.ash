@@ -8,9 +8,64 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <main id="app" aria-label="Portfolio">
-      <!-- Fresh start: add the new portfolio design here. Reference assets remain in the repository. -->
+    <header class="hero" id="top">
+      <div class="hero__glow" aria-hidden="true"></div>
+
+      <nav class="topbar" aria-label="Main navigation">
+        <div class="brand">Reyon S</div>
+      </nav>
+
+      <div class="hero__content">
+        <div class="hero__text">
+          <p class="eyebrow">Portfolio / Motion Designer</p>
+          <h1>Designing stories that move people.</h1>
+          <p class="lede">
+            I craft cinematic visuals, motion-first experiences, and polished digital
+            identities for brands and creators.
+          </p>
+        </div>
+
+        <div class="video-panel" aria-label="Featured video scroll animation">
+          <div class="video-frame">
+            <video
+              class="portfolio-video"
+              autoplay
+              muted
+              loop
+              playsinline
+              poster="./Gemini_Generated_Image_6skbpo6skbpo6skb.jpg"
+              aria-label="Featured portfolio video"
+            >
+              <source src="./Sample%20Video.mp4" type="video/mp4" />
+            </video>
+          </div>
+        </div>
+      </div>
+
+      <button class="scroll-cue" type="button" aria-label="Scroll down to next section">
+        <span class="scroll-cue__text">Scroll down</span>
+        <span class="scroll-cue__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" role="presentation">
+            <path d="M12 4v12m0 0 5-5m-5 5-5-5" />
+          </svg>
+        </span>
+      </button>
+    </header>
+
+    <main>
+      <section class="content-section" id="about" aria-labelledby="about-title">
+        <div class="section-heading">
+          <p class="eyebrow eyebrow--light">Selected work</p>
+          <h2 id="about-title">Smooth, immersive portfolio experiences.</h2>
+        </div>
+        <p>
+          This section is intentionally minimal so the scroll cue and video remain the
+          key focal point. The motion and smooth scrolling have been tuned to feel
+          fluid on desktop and mobile.
+        </p>
+      </section>
     </main>
+
     <script src="script.js"></script>
   </body>
 </html>
